@@ -1,167 +1,91 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { TonConnectButton, useTonConnectUI, useTonAddress } from '@tonconnect/ui-react';
-import { beginCell, Address, toNano } from '@ton/core';
-import { io } from 'socket.io-client';
 
 interface Market {
-  id: string;
-  category: 'CRYPTO' | 'SPORTS' | 'NEWS' | 'POLITICS';
-  question: string;
   poolAddress: string;
-  yesPercent: number;
-  status: 'LIVE' | 'LOCKED' | 'RESOLVED';
-  outcome?: boolean;
+  type: string;
+  symbol: string;
+  targetValue: number;
+  status: 'active' | 'settled';
 }
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
-
-export default function KoteMarketApp() {
+export default function Home() {
   const [markets, setMarkets] = useState<Market[]>([]);
-  const [activeTab, setActiveTab] = useState<string>('ALL');
-  const [wagerAmount, setWagerAmount] = useState<string>('10');
-  const [tonConnectUI] = useTonConnectUI();
-  const userAddress = useTonAddress();
+  const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    fetch(`${API_URL}/api/markets`)
-      .then((res) => res.json())
-      .then((data) => setMarkets(data));
+  // Replace with your actual Render backend URL
+  const BACKEND_URL = 'https://kote-backend.onrender.com';
 
-    const socket = io(API_URL);
-    socket.on('market_update', (updated: Market) => {
-      setMarkets((prev) => prev.map((m) => (m.id === updated.id ? updated : m)));
-    });
-
-    return () => {
-      socket.disconnect();
-    };
-  }, []);
-
-  const placeGramBet = async (market: Market, sideYes: boolean) => {
-    if (!userAddress) {
-      tonConnectUI.openModal();
-      return;
+  const fetchMarkets = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/markets`);
+      const data = await res.json();
+      if (data.success) {
+        setMarkets(data.markets);
+      } else {
+        setError('Failed to load market data.');
+      }
+    } catch (err: any) {
+      console.error('Fetch error:', err);
+      setError('Could not connect to the KOTE oracle backend.');
+    } finally {
+      setLoading(false);
     }
-
-    // Build forward payload: 1 bit indicating YES (1) or NO (0)
-    const forwardPayload = beginCell().storeBit(sideYes).endCell();
-
-    // Standard TIP-3 Jetton Transfer Body to send $GRAM to the Market Pool
-    const jettonTransferBody = beginCell()
-      .storeUint(0xf8a7ea5, 32) // Jetton transfer opcode
-      .storeUint(0, 64) // query_id
-      .storeCoins(toNano(wagerAmount)) // $GRAM amount
-      .storeAddress(Address.parse(market.poolAddress)) // Destination PredictionPool
-      .storeAddress(Address.parse(userAddress)) // Excess gas return address
-      .storeBit(0) // No custom payload
-      .storeCoins(toNano('0.05')) // Forward TON for contract execution
-      .storeBit(1) // Forward payload as reference
-      .storeRef(forwardPayload)
-      .endCell();
-
-    await tonConnectUI.sendTransaction({
-      validUntil: Math.floor(Date.now() / 1000) + 300,
-      messages: [
-        {
-          // Replace with the user's resolved $GRAM Jetton Wallet address in production
-          address: process.env.NEXT_PUBLIC_GRAM_MASTER_ADDRESS || market.poolAddress,
-          amount: toNano('0.1').toString(),
-          payload: jettonTransferBody.toBoc().toString('base64'),
-        },
-      ],
-    });
   };
 
-  const filtered = activeTab === 'ALL' ? markets : markets.filter((m) => m.category === activeTab);
+  useEffect(() => {
+    fetchMarkets();
+    // Optional: auto-refresh every 30 seconds
+    const interval = setInterval(fetchMarkets, 30000);
+    return () => clearInterval(interval);
+  }, []);
 
   return (
-    <main className="max-w-md mx-auto p-4 space-y-5">
-      {/* Header */}
-      <header className="flex items-center justify-between border-b border-zinc-800 pb-3">
-        <div>
-          <h1 className="text-xl font-extrabold tracking-tight text-amber-400">KOTE MARKET</h1>
-          <p className="text-xs text-zinc-400">Real-Time $GRAM Predictions</p>
-        </div>
-        <TonConnectButton />
+    <main style={{ padding: '20px', fontFamily: 'sans-serif', color: '#fff', background: '#121212', minHeight: '100vh' }}>
+      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+        <h1 style={{ fontSize: '22px', margin: 0 }}>KOTE Prediction Markets</h1>
+        <button 
+          onClick={fetchMarkets} 
+          style={{ background: '#2481cc', color: '#fff', border: 'none', padding: '8px 12px', borderRadius: '6px', cursor: 'pointer' }}
+        >
+          Refresh
+        </button>
       </header>
 
-      {/* Category Filter */}
-      <div className="flex gap-2 overflow-x-auto pb-1 text-xs font-semibold">
-        {['ALL', 'CRYPTO', 'SPORTS', 'NEWS', 'POLITICS'].map((cat) => (
-          <button
-            key={cat}
-            onClick={() => setActiveTab(cat)}
-            className={`px-3 py-1.5 rounded-full transition ${
-              activeTab === cat ? 'bg-amber-400 text-black' : 'bg-zinc-900 text-zinc-300'
-            }`}
-          >
-            {cat}
-          </button>
-        ))}
-      </div>
+      <section>
+        <h2 style={{ fontSize: '16px', color: '#aaa', marginBottom: '12px' }}>Live Oracle Queue</h2>
+        
+        {loading && <p>Loading active markets...</p>}
+        {error && <p style={{ color: '#e74c3c' }}>{error}</p>}
 
-      {/* Wager Input */}
-      <div className="bg-zinc-900 p-3 rounded-xl flex items-center justify-between border border-zinc-800">
-        <span className="text-xs text-zinc-400">Wager Amount ($GRAM)</span>
-        <input
-          type="number"
-          value={wagerAmount}
-          onChange={(e) => setWagerAmount(e.target.value)}
-          className="bg-zinc-950 border border-zinc-700 rounded-lg px-3 py-1 w-24 text-right font-bold text-amber-400"
-        />
-      </div>
+        {!loading && !error && markets.length === 0 && (
+          <p style={{ color: '#888' }}>No active markets currently registered in the oracle engine.</p>
+        )}
 
-      {/* Market Cards */}
-      <div className="space-y-4">
-        {filtered.map((market) => (
-          <div key={market.id} className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 space-y-3">
-            <div className="flex justify-between items-center text-xs">
-              <span className="px-2 py-0.5 rounded bg-zinc-800 text-amber-400 font-medium">
-                {market.category}
-              </span>
-              <span className={market.status === 'LIVE' ? 'text-emerald-400' : 'text-rose-400'}>
-                {market.status === 'LIVE' ? '● LIVE' : `ENDED (${market.outcome ? 'YES' : 'NO'})`}
-              </span>
-            </div>
-
-            <h2 className="font-bold text-base leading-snug">{market.question}</h2>
-
-            {/* Probability Bar */}
-            <div className="space-y-1">
-              <div className="flex justify-between text-xs font-semibold">
-                <span className="text-emerald-400">YES {market.yesPercent}%</span>
-                <span className="text-rose-400">NO {100 - market.yesPercent}%</span>
-              </div>
-              <div className="w-full h-2 bg-rose-500/30 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-emerald-400 transition-all duration-300"
-                  style={{ width: `${market.yesPercent}%` }}
-                />
-              </div>
-            </div>
-
-            {/* Bet Buttons */}
-            {market.status === 'LIVE' && (
-              <div className="grid grid-cols-2 gap-2 pt-1">
-                <button
-                  onClick={() => placeGramBet(market, true)}
-                  className="bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 py-2 rounded-xl font-bold text-sm"
-                >
-                  Bet YES
-                </button>
-                <button
-                  onClick={() => placeGramBet(market, false)}
-                  className="bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 py-2 rounded-xl font-bold text-sm"
-                >
-                  Bet NO
-                </button>
-              </div>
-            )}
+        {!loading && !error && markets.map((market, index) => (
+          <div key={index} style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '10px', padding: '14px', marginBottom: '12px' }}>
+            <h3 style={{ margin: '0 0 6px 0', textTransform: 'uppercase' }}>{market.symbol} / USD</h3>
+            <p style={{ margin: '4px 0', color: '#ccc' }}><strong>Target Price:</strong> ${market.targetValue.toLocaleString()}</p>
+            <p style={{ margin: '4px 0', color: '#777', fontSize: '13px' }}><strong>Pool:</strong> {market.poolAddress}</p>
+            <span style={{ 
+              display: 'inline-block', 
+              marginTop: '8px', 
+              padding: '4px 8px', 
+              borderRadius: '6px', 
+              fontSize: '12px', 
+              fontWeight: 'bold',
+              background: market.status === 'active' ? '#d4ac0d' : '#27ae60',
+              color: '#000'
+            }}>
+              {market.status.toUpperCase()}
+            </span>
           </div>
         ))}
-      </div>
+      </section>
     </main>
   );
 }
