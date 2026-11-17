@@ -1,15 +1,12 @@
-'use client';
-
-import { TonConnectUIProvider } from '@tonconnect/ui-react';
-import './globals.css';
-
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
     <html lang="en">
-      <body className="bg-zinc-950 text-white antialiased">
-        <TonConnectUIProvider manifestUrl="https://kote-market-frontend.onrender.com/tonconnect-manifest.json">
-          {children}
-        </TonConnectUIProvider>
+      <body style={{ margin: 0, background: '#0b0e14', color: '#fff', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
+        {children}
       </body>
     </html>
   );
