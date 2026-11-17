@@ -1,35 +1,29 @@
-import { TonClient, WalletContractV4, internal, beginCell, Address } from '@ton/ton';
-import { mnemonicToPrivateKey } from '@ton/crypto';
+import { TonClient } from '@ton/ton';
 
-export async function settleMarketOnChain(poolAddress: string, outcome: boolean) {
+/**
+ * Verifies the connection to the TON blockchain network via RPC.
+ */
+export async function verifyTonConnection() {
   const client = new TonClient({
-    endpoint: process.env.TON_RPC_URL || 'https://testnet.toncenter.com/api/v2/jsonRPC',
+    endpoint: process.env.TON_RPC_ENDPOINT || 'https://testnet.toncenter.com/api/v2/jsonRPC',
+    apiKey: process.env.TONCENTER_API_KEY, // Optional: helps prevent rate limits
   });
 
-  const mnemonic = (process.env.ORACLE_MNEMONIC || '').split(' ');
-  const keyPair = await mnemonicToPrivateKey(mnemonic);
-  const wallet = WalletContractV4.create({ workchain: 0, publicKey: keyPair.publicKey });
-  const contract = client.open(wallet);
+  try {
+    const lastBlock = await client.getLastBlock();
+    console.log(`[TON Check] Connected successfully! Latest masterchain seqno: ${lastBlock.last.seqno}`);
+    return { connected: true, latestSeqno: lastBlock.last.seqno };
+  } catch (err: any) {
+    console.error('[TON Check Error] Failed to connect to TON RPC:', err.message);
+    return { connected: false, error: err.message };
+  }
+}
 
-  const seqno = await contract.getSeqno();
-
-  // Build ResolveMarket message payload
-  const body = beginCell()
-    .storeUint(0x4b4f5445, 32) // Opcode (match generated ABI)
-    .storeBit(outcome)
-    .endCell();
-
-  await contract.sendTransfer({
-    seqno,
-    secretKey: keyPair.secretKey,
-    messages: [
-      internal({
-        to: Address.parse(poolAddress),
-        value: '0.05',
-        body,
-      }),
-    ],
-  });
-
-  console.log(`[TON SETTLER] Market ${poolAddress} resolved to ${outcome ? 'YES' : 'NO'}`);
+/**
+ * Stub function for your actual market settlement transaction logic
+ */
+export async function settleMarketOnChain(poolAddress: string, winningOutcome: string) {
+  console.log(`[tonSettler] Settling pool ${poolAddress} with outcome: ${winningOutcome}`);
+  // Add your actual transaction broadcasting logic here
+  return true;
 }
