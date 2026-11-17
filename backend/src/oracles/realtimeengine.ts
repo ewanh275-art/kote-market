@@ -1,85 +1,100 @@
 import axios from 'axios';
-import { Server } from 'socket.io';
 import { settleMarketOnChain } from '../blockchain/tonSettler';
 
-export interface Market {
-  id: string;
-  category: 'CRYPTO' | 'SPORTS' | 'NEWS' | 'POLITICS';
-  question: string;
+interface ActiveMarket {
   poolAddress: string;
-  externalEventId: string; // e.g., API-Football fixture ID or Pyth symbol
+  type: 'crypto' | 'sports';
+  symbol?: string; // e.g., 'bitcoin' for CoinGecko
+  fixtureId?: number; // for sports API
   targetValue?: number;
-  endTime: number;
-  yesPercent: number;
-  status: 'LIVE' | 'LOCKED' | 'RESOLVED';
-  outcome?: boolean;
+  expectedOutcome?: boolean;
+  status: 'active' | 'resolved';
 }
 
-export const activeMarkets: Market[] = [
-  {
-    id: 'mkt-1',
-    category: 'SPORTS',
-    question: 'Man City to beat Liverpool (Full Time)?',
-    poolAddress: 'EQC_YOUR_DEPLOYED_POOL_ADDRESS_1',
-    externalEventId: '1208021', // Fixture ID
-    endTime: Date.now() + 5400000,
-    yesPercent: 54,
-    status: 'LIVE',
-  },
-  {
-    id: 'mkt-2',
-    category: 'CRYPTO',
-    question: 'BTC above $95,000 at 20:00 UTC?',
-    poolAddress: 'EQC_YOUR_DEPLOYED_POOL_ADDRESS_2',
-    externalEventId: 'BTCUSDT',
-    targetValue: 95000,
-    endTime: Date.now() + 3600000,
-    yesPercent: 62,
-    status: 'LIVE',
-  },
-];
+// In-memory store or fetched from your database/contracts
+let activeMarkets: ActiveMarket[] = [];
 
-export function startRealtimeOracle(io: Server) {
+export function registerMarketForMonitoring(market: ActiveMarket) {
+  activeMarkets.push(market);
+  console.log(`[Oracle] Registered market for monitoring: ${market.poolAddress} (${market.type})`);
+}
+
+export function startRealtimeEngine() {
+  console.log('[Oracle] Starting Realtime Oracle Engine...');
+
+  // Run the polling check every 30 seconds
   setInterval(async () => {
+    if (activeMarkets.length === 0) return;
+
+    console.log(`[Oracle] Checking ${activeMarkets.length} active markets...`);
+
     for (const market of activeMarkets) {
-      if (market.status !== 'LIVE') continue;
+      if (market.status === 'resolved') continue;
 
       try {
-        // 1. REAL-TIME SPORTS SETTLEMENT (Ends exact second match hits Full Time)
-        if (market.category === 'SPORTS' && process.env.SPORTS_API_KEY) {
-          const res = await axios.get(
-            `https://v3.football.api-sports.io/fixtures?id=${market.externalEventId}`,
-            { headers: { 'x-apisports-key': process.env.SPORTS_API_KEY } }
-          );
-          const fixture = res.data?.response?.[0];
-          const matchStatus = fixture?.fixture?.status?.short;
-
-          // 'FT' = Full Time, 'AET' = After Extra Time, 'PEN' = Penalties
-          if (['FT', 'AET', 'PEN'].includes(matchStatus)) {
-            const homeWon = fixture.teams.home.winner === true;
-            market.status = 'RESOLVED';
-            market.outcome = homeWon;
-            await settleMarketOnChain(market.poolAddress, homeWon);
-            io.emit('market_update', market);
-          }
+        if (market.type === 'crypto' && market.symbol) {
+          await checkCryptoMarket(market);
+        } else if (market.type === 'sports' && market.fixtureId) {
+          await checkSportsMarket(market);
         }
-
-        // 2. REAL-TIME CRYPTO SETTLEMENT (Ends exact second timestamp expires)
-        if (market.category === 'CRYPTO' && Date.now() >= market.endTime) {
-          const priceRes = await axios.get(
-            `https://api.binance.com/api/v3/ticker/price?symbol=${market.externalEventId}`
-          );
-          const currentPrice = parseFloat(priceRes.data.price);
-          const outcome = currentPrice >= (market.targetValue || 0);
-
-          market.status = 'RESOLVED';
-          market.outcome = outcome;
-          await settleMarketOnChain(market.poolAddress, outcome);
-          io.emit('market_update', market);
-        }
-      } catch (err) {
-        console.error(`Oracle error for ${market.id}:`, err);
+      } catch (err: any) {
+        console.error(`[Oracle Error] Failed to evaluate market ${market.poolAddress}:`, err.message);
       }
     }
-  }, 5000); // Checks every 5 seconds
+  }, 30000);
+}
+
+async function checkCryptoMarket(market: ActiveMarket) {
+  const response = await axios.get(`https://api.coingecko.com/api/v3/simple/price`, {
+    params: {
+      ids: market.symbol,
+      vs_currencies: 'usd',
+    },
+  });
+
+  const currentPrice = response.data[market.symbol!]?.usd;
+  if (!currentPrice) return;
+
+  console.log(`[Crypto Oracle] ${market.symbol} current price: $${currentPrice} (Target: $${market.targetValue})`);
+
+  if (market.targetValue && currentPrice >= market.targetValue) {
+    const outcome = true;
+    console.log(`[Crypto Oracle] Market condition met! Settling on-chain...`);
+    
+    await settleMarketOnChain(market.poolAddress, outcome);
+    market.status = 'resolved';
+  }
+}
+
+async function checkSportsMarket(market: ActiveMarket) {
+  const apiKey = process.env.SPORTS_API_KEY as string;
+  if (!apiKey) {
+    console.warn('[Sports Oracle] SPORTS_API_KEY is not defined in environment variables.');
+    return;
+  }
+
+  const response = await axios.get(`https://v3.football.api-sports.io/fixtures`, {
+    params: { id: market.fixtureId },
+    headers: {
+      'x-apisports-key': apiKey,
+    },
+  });
+
+  const fixture = response.data.response?.[0];
+  if (!fixture) return;
+
+  const matchStatus = fixture.fixture.status.short; // e.g., 'FT' for Full Time
+
+  if (matchStatus === 'FT') {
+    const homeGoals = fixture.goals.home;
+    const awayGoals = fixture.goals.away;
+    
+    // Example condition: Home team wins
+    const outcome = homeGoals > awayGoals;
+
+    console.log(`[Sports Oracle] Match finished. Home: ${homeGoals}, Away: ${awayGoals}. Settling on-chain...`);
+
+    await settleMarketOnChain(market.poolAddress, outcome);
+    market.status = 'resolved';
+  }
 }
