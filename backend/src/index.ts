@@ -1,7 +1,7 @@
 import express, { Request, Response } from 'express';
 import axios from 'axios';
 import { registerMarketForMonitoring } from './oracles/realtimeEngine';
-import { verifyTonConnection } from './blockchain/tonsettler';
+import { verifyTonConnection } from './blockchain/tonSettler';
 
 const app = express();
 const PORT = process.env.PORT || 10000;
