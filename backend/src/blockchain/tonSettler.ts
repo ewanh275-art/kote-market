@@ -51,9 +51,8 @@ export async function settleMarketOnChain(poolAddress: string, winningOutcome: s
   }
 
   // 4. Construct the payload body for your smart contract settlement
-  // (Adjust the opcode and cell structure according to your specific FunC/Tact contract interface)
   const settlementPayload = beginCell()
-    .storeUint(0x73657474, 32) // Example op code for 'settle' (or your contract's specific opcode)
+    .storeUint(0x73657474, 32) // Example op code for 'settle'
     .storeRef(
       beginCell()
         .storeStringTail(winningOutcome)
