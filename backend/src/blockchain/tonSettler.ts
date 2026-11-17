@@ -10,9 +10,9 @@ export async function verifyTonConnection() {
   });
 
   try {
-    const lastBlock = await client.getLastBlock();
-    console.log(`[TON Check] Connected successfully! Latest masterchain seqno: ${lastBlock.last.seqno}`);
-    return { connected: true, latestSeqno: lastBlock.last.seqno };
+    const masterchainInfo = await client.getCurrentMasterchainInfo();
+    console.log(`[TON Check] Connected successfully! Latest masterchain seqno: ${masterchainInfo.lastSeqno}`);
+    return { connected: true, latestSeqno: masterchainInfo.lastSeqno };
   } catch (err: any) {
     console.error('[TON Check Error] Failed to connect to TON RPC:', err.message);
     return { connected: false, error: err.message };
