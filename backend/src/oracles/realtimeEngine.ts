@@ -16,12 +16,18 @@ const activeMarkets: MarketTarget[] = [];
  * Registers a new prediction market into the oracle monitoring queue.
  */
 export function registerMarketForMonitoring(market: MarketTarget) {
-  // Prevent duplicate entries for the same pool
   const existing = activeMarkets.find((m) => m.poolAddress === market.poolAddress);
   if (!existing) {
     activeMarkets.push(market);
     console.log(`[Oracle Engine] Registered market for monitoring: Pool ${market.poolAddress} (${market.symbol} target: $${market.targetValue})`);
   }
+}
+
+/**
+ * Returns all active/settled markets for frontend consumption.
+ */
+export function getActiveMarkets() {
+  return activeMarkets;
 }
 
 // Polling loop running every 30 seconds to evaluate active markets
@@ -35,7 +41,6 @@ setInterval(async () => {
 
     try {
       if (market.type === 'crypto') {
-        // Fetch live price from CoinGecko with rate-limit error catching
         let currentPrice: number | null = null;
         try {
           const res = await axios.get('https://api.coingecko.com/api/v3/simple/price', {
@@ -44,22 +49,18 @@ setInterval(async () => {
           currentPrice = res.data?.[market.symbol]?.usd;
         } catch (cgErr: any) {
           console.warn(`[Oracle Engine] CoinGecko rate-limited or failed for ${market.symbol}: ${cgErr.message}`);
-          continue; // Skip this tick if rate-limited and try again next interval
+          continue;
         }
 
         if (!currentPrice) continue;
 
         console.log(`[Crypto Oracle] ${market.symbol} current price: $${currentPrice} (Target: $${market.targetValue})`);
 
-        // Check if target condition is met
         if (currentPrice >= market.targetValue) {
           console.log(`[Crypto Oracle] Target met for pool ${market.poolAddress}! Triggering on-chain settlement...`);
           
           try {
-            // Execute real smart contract settlement on TON
             await settleMarketOnChain(market.poolAddress, 'bullish_win');
-            
-            // Mark as settled so it stops polling this market
             market.status = 'settled';
             console.log(`[Crypto Oracle] Successfully marked pool ${market.poolAddress} as settled.`);
           } catch (settleErr: any) {
