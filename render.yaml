@@ -1,0 +1,42 @@
+services:
+  # 1. Node.js Backend + Telegram Bot + Real-Time Oracles
+  - type: web
+    name: kote-market-backend
+    runtime: node
+    rootDir: backend
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: kote-market-db
+          property: connectionString
+      - key: BOT_TOKEN
+        sync: false
+      - key: WEBAPP_URL
+        sync: false
+      - key: ORACLE_MNEMONIC
+        sync: false
+      - key: SPORTS_API_KEY
+        sync: false
+      - key: TON_RPC_URL
+        value: https://testnet.toncenter.com/api/v2/jsonRPC
+
+  # 2. Next.js Telegram Mini App Frontend
+  - type: web
+    name: kote-market-frontend
+    runtime: node
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NEXT_PUBLIC_API_URL
+        sync: false
+      - key: NEXT_PUBLIC_GRAM_MASTER_ADDRESS
+        sync: false
+
+databases:
+  - name: kote-market-db
+    plan: free
