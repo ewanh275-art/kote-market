@@ -1,61 +1,50 @@
-import express from 'express';
-import http from 'http';
-import cors from 'cors';
-import dotenv from 'dotenv';
-import { Server } from 'socket.io';
-import { Bot, InlineKeyboard } from 'grammy';
-import { activeMarkets, startRealtimeOracle } from './oracles/realtimeEngine';
-
-dotenv.config();
+import express, { Request, Response } from 'express';
+import axios from 'axios';
+import { registerMarketForMonitoring } from './oracles/realtimeEngine';
+import { verifyTonConnection } from './blockchain/tonsettler';
 
 const app = express();
-app.use(cors());
+const PORT = process.env.PORT || 10000;
+
 app.use(express.json());
 
-const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: '*' } });
-
-// API endpoint for Mini App to fetch markets
-app.get('/api/markets', (req, res) => {
-  res.json(activeMarkets);
+// Health check endpoint for Render
+app.get('/', (req: Request, res: Response) => {
+  res.status(200).json({ status: 'online', service: 'KOTE Market Backend Oracle' });
 });
 
-// Admin / News Webhook endpoint to settle breaking News & Politics in real time
-app.post('/api/admin/resolve', async (req, res) => {
-  const { marketId, outcome, secret } = req.body;
-  if (secret !== process.env.BOT_TOKEN) return res.status(401).json({ error: 'Unauthorized' });
+// Comprehensive test endpoint to verify External APIs & TON Blockchain connectivity
+app.get('/api/test-oracle', async (req: Request, res: Response) => {
+  try {
+    // 1. Test External API (CoinGecko)
+    const cgRes = await axios.get('https://api.coingecko.com/api/v3/simple/price', {
+      params: { ids: 'bitcoin', vs_currencies: 'usd' },
+    });
+    const btcPrice = cgRes.data?.bitcoin?.usd;
 
-  const market = activeMarkets.find((m) => m.id === marketId);
-  if (!market) return res.status(404).json({ error: 'Market not found' });
+    // 2. Test TON Blockchain RPC Connection
+    const tonStatus = await verifyTonConnection();
 
-  market.status = 'RESOLVED';
-  market.outcome = outcome;
-  io.emit('market_update', market);
-  res.json({ success: true, market });
+    // 3. Register a dry-run mock market into the Realtime Engine
+    registerMarketForMonitoring({
+      poolAddress: 'EQ_DRY_RUN_TEST_POOL',
+      type: 'crypto',
+      symbol: 'bitcoin',
+      targetValue: 9999999, // Set high so it safely logs without triggering accidental real settlement
+      status: 'active',
+    });
+
+    res.status(200).json({
+      success: true,
+      externalApi: { status: 'OK', btcPriceUsd: btcPrice },
+      tonBlockchain: tonStatus,
+      oracleQueue: 'Mock market registered successfully. Check Render logs in 30s for the polling loop output.',
+    });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
 });
 
-// Telegram Bot Setup
-if (process.env.BOT_TOKEN) {
-  const bot = new Bot(process.env.BOT_TOKEN);
-
-  bot.command('start', async (ctx) => {
-    const keyboard = new InlineKeyboard().webApp(
-      'Open KOTE MARKET',
-      process.env.WEBAPP_URL || 'https://kote-market-frontend.onrender.com'
-    );
-
-    await ctx.reply(
-      'Welcome to **KOTE MARKET** — Real-Time $GRAM Prediction Markets.\n\nBet live on Crypto, Football, Global News & Politics with instant on-chain payouts.',
-      { parse_mode: 'Markdown', reply_markup: keyboard }
-    );
-  });
-
-  bot.start();
-}
-
-startRealtimeOracle(io);
-
-const PORT = process.env.PORT || 4000;
-server.listen(PORT, () => {
-  console.log(`KOTE MARKET Backend running on port ${PORT}`);
+app.listen(PORT, () => {
+  console.log(`[Server] KOTE Oracle backend running and listening on port ${PORT}`);
 });
