@@ -1,4 +1,4 @@
-import { TonClient } from '@ton/ton';
+import { TonClient, Address } from '@ton/ton';
 
 /**
  * Verifies the connection to the TON blockchain network via RPC.
@@ -10,9 +10,13 @@ export async function verifyTonConnection() {
   });
 
   try {
-    const masterchainInfo = await client.getCurrentMasterchainInfo();
-    console.log(`[TON Check] Connected successfully! Latest masterchain seqno: ${masterchainInfo.lastSeqno}`);
-    return { connected: true, latestSeqno: masterchainInfo.lastSeqno };
+    // Query a well-known address (e.g., the TON Foundation / DNS root or any valid testnet/mainnet address) 
+    // to verify the RPC client is actively communicating with the network.
+    const testAddress = Address.parse('EQCD39VS5jcptHL8vMjEXrzGaRcCVYto7HUn4bpAOg8xqB2N');
+    const state = await client.getContractState(testAddress);
+    
+    console.log(`[TON Check] Connected successfully! Contract state retrieved.`);
+    return { connected: true, state: state.state };
   } catch (err: any) {
     console.error('[TON Check Error] Failed to connect to TON RPC:', err.message);
     return { connected: false, error: err.message };
