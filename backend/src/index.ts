@@ -15,34 +15,38 @@ app.get('/', (req: Request, res: Response) => {
 
 // Comprehensive test endpoint to verify External APIs & TON Blockchain connectivity
 app.get('/api/test-oracle', async (req: Request, res: Response) => {
+  let btcPrice = null;
+  let cgStatus = 'OK';
+
   try {
-    // 1. Test External API (CoinGecko)
+    // 1. Test External API (CoinGecko) with rate-limit protection
     const cgRes = await axios.get('https://api.coingecko.com/api/v3/simple/price', {
       params: { ids: 'bitcoin', vs_currencies: 'usd' },
     });
-    const btcPrice = cgRes.data?.bitcoin?.usd;
-
-    // 2. Test TON Blockchain RPC Connection
-    const tonStatus = await verifyTonConnection();
-
-    // 3. Register a dry-run mock market into the Realtime Engine
-    registerMarketForMonitoring({
-      poolAddress: 'EQ_DRY_RUN_TEST_POOL',
-      type: 'crypto',
-      symbol: 'bitcoin',
-      targetValue: 9999999, // Set high so it safely logs without triggering accidental real settlement
-      status: 'active',
-    });
-
-    res.status(200).json({
-      success: true,
-      externalApi: { status: 'OK', btcPriceUsd: btcPrice },
-      tonBlockchain: tonStatus,
-      oracleQueue: 'Mock market registered successfully. Check Render logs in 30s for the polling loop output.',
-    });
-  } catch (error: any) {
-    res.status(500).json({ success: false, error: error.message });
+    btcPrice = cgRes.data?.bitcoin?.usd;
+  } catch (cgErr: any) {
+    cgStatus = `Rate limited or failed: ${cgErr.message} (Using fallback/mock price for test)`;
+    btcPrice = 65000; // Fallback mock price so the test continues
   }
+
+  // 2. Test TON Blockchain RPC Connection
+  const tonStatus = await verifyTonConnection();
+
+  // 3. Register a dry-run mock market into the Realtime Engine
+  registerMarketForMonitoring({
+    poolAddress: 'EQ_DRY_RUN_TEST_POOL',
+    type: 'crypto',
+    symbol: 'bitcoin',
+    targetValue: 9999999,
+    status: 'active',
+  });
+
+  res.status(200).json({
+    success: true,
+    externalApi: { status: cgStatus, btcPriceUsd: btcPrice },
+    tonBlockchain: tonStatus,
+    oracleQueue: 'Mock market registered successfully. Check Render logs for the polling loop output.',
+  });
 });
 
 app.listen(PORT, () => {
